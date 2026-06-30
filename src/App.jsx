@@ -50,6 +50,8 @@ const emptyForm = {
   date: '',
   p1: '', p2: '', p3: '', p4: '',
   p5: '', p6: '', p7: '',
+  listenScore: '',
+  readScore: '',
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -64,10 +66,19 @@ function ScoreModal({ isOpen, onClose, onSave, initialData, isEditing }) {
     }
   }, [isOpen, initialData])
 
-  const { listenScore, readScore, totalScore } = useMemo(() => calcScores(form), [form])
+  const listenScore = parseInt(form.listenScore) || 0
+  const readScore = parseInt(form.readScore) || 0
+  const totalScore = listenScore + readScore
 
   const handleChange = useCallback((field, value) => {
     setForm(prev => ({ ...prev, [field]: value }))
+  }, [])
+
+  const handleScoreChange = useCallback((field, value) => {
+    const num = parseInt(value)
+    if (value === '' || (num >= 0 && num <= 495)) {
+      setForm(prev => ({ ...prev, [field]: value }))
+    }
   }, [])
 
   const handleSubmit = (e) => {
@@ -150,7 +161,12 @@ function ScoreModal({ isOpen, onClose, onSave, initialData, isEditing }) {
                 <PartInput label="Part 4 (0-30)" id="m-p4" value={form.p4} max={30}
                   onChange={(v) => handleChange('p4', v)} />
               </div>
-              <ScoreSummaryBox label="Tổng Điểm Nghe:" score={listenScore} id="m-listen-score" />
+              <ScoreInputBox
+                label="Tổng Điểm Nghe:"
+                value={form.listenScore}
+                onChange={(v) => handleScoreChange('listenScore', v)}
+                id="m-listen-score"
+              />
             </div>
 
             {/* Reading */}
@@ -169,7 +185,12 @@ function ScoreModal({ isOpen, onClose, onSave, initialData, isEditing }) {
                     onChange={(v) => handleChange('p7', v)} />
                 </div>
               </div>
-              <ScoreSummaryBox label="Tổng Điểm Đọc:" score={readScore} id="m-read-score" />
+              <ScoreInputBox
+                label="Tổng Điểm Đọc:"
+                value={form.readScore}
+                onChange={(v) => handleScoreChange('readScore', v)}
+                id="m-read-score"
+              />
             </div>
           </div>
 
@@ -177,7 +198,7 @@ function ScoreModal({ isOpen, onClose, onSave, initialData, isEditing }) {
           <div className="bg-primary-container p-4 rounded-lg flex justify-between items-center text-on-primary-container mb-6">
             <span className="font-title-md flex items-center gap-2">
               <span className="material-symbols-outlined">emoji_events</span>
-              TỔNG ĐIỂM DỰ KIẾN:
+              TỔNG ĐIỂM:
             </span>
             <span className="font-display-score text-4xl" id="m-total-score">{totalScore}</span>
           </div>
@@ -228,13 +249,54 @@ function PartInput({ label, id, value, max, onChange }) {
   )
 }
 
-// ─── Score Summary Box ──────────────────────────────────────────────
+// ─── Score Summary Box (read-only) ──────────────────────────────────
 function ScoreSummaryBox({ label, score, id }) {
   return (
     <div className="bg-secondary-container/20 p-3 rounded flex justify-between items-center mt-2 border border-secondary-container">
       <span className="font-label-sm text-label-sm text-on-secondary-container">{label}</span>
       <span className="font-display-score text-2xl text-primary" id={id}>{score}</span>
     </div>
+  )
+}
+
+// ─── Editable Score Input Box ───────────────────────────────────────
+function ScoreInputBox({ label, value, onChange, id }) {
+  return (
+    <div className="bg-secondary-container/20 p-3 rounded flex justify-between items-center mt-2 border border-secondary-container">
+      <span className="font-label-sm text-label-sm text-on-secondary-container">{label}</span>
+      <input
+        type="number"
+        className="w-24 text-right border border-outline-variant rounded p-1.5 font-display-score text-xl text-primary bg-white focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+        id={id}
+        min={0}
+        max={495}
+        placeholder="0"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  )
+}
+
+// ─── Sortable Table Header ──────────────────────────────────────────
+function SortableTh({ label, sortKey, sortConfig, onSort, className }) {
+  const isActive = sortConfig.key === sortKey
+  const icon = isActive
+    ? (sortConfig.direction === 'asc' ? 'arrow_upward' : 'arrow_downward')
+    : 'swap_vert'
+  return (
+    <th
+      className={`${className} cursor-pointer select-none hover:bg-primary/10 transition-all group`}
+      onClick={() => onSort(sortKey)}
+      title={`Sắp xếp theo ${label}`}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className={`material-symbols-outlined text-[14px] transition-all ${
+          isActive ? 'opacity-100 text-primary' : 'opacity-0 group-hover:opacity-50'
+        }`}>{icon}</span>
+      </span>
+    </th>
   )
 }
 
@@ -378,6 +440,7 @@ function App() {
   const [toast, setToast] = useState(null)
   const [visibleCount, setVisibleCount] = useState(10)
   const [searchQuery, setSearchQuery] = useState('')
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'desc' })
 
   // Persist to localStorage whenever scores change
   useEffect(() => {
@@ -394,8 +457,45 @@ function App() {
     )
   }, [scores, searchQuery])
 
-  const visibleScores = filteredScores.slice(0, visibleCount)
-  const hasMore = filteredScores.length > visibleCount
+  // Sorted scores
+  const sortedScores = useMemo(() => {
+    if (!sortConfig.key) return filteredScores
+    const sorted = [...filteredScores].sort((a, b) => {
+      let aVal, bVal
+      if (sortConfig.key === 'date') {
+        aVal = a.date || ''
+        bVal = b.date || ''
+        return sortConfig.direction === 'asc'
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal)
+      } else if (sortConfig.key === 'testName') {
+        aVal = (a.testName || '').toLowerCase()
+        bVal = (b.testName || '').toLowerCase()
+        return sortConfig.direction === 'asc'
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal)
+      } else {
+        aVal = Number(a[sortConfig.key]) || 0
+        bVal = Number(b[sortConfig.key]) || 0
+        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal
+      }
+    })
+    return sorted
+  }, [filteredScores, sortConfig])
+
+  const visibleScores = sortedScores.slice(0, visibleCount)
+  const hasMore = sortedScores.length > visibleCount
+
+  const handleSort = useCallback((key) => {
+    setSortConfig(prev => {
+      if (prev.key === key) {
+        // Toggle direction, or clear if already ascending
+        if (prev.direction === 'desc') return { key, direction: 'asc' }
+        return { key: null, direction: 'desc' } // clear sort
+      }
+      return { key, direction: 'desc' }
+    })
+  }, [])
 
   // ─── Handlers ──────────────────────────────────────────────────
   const handleSave = useCallback((record) => {
@@ -523,18 +623,23 @@ function App() {
               <table className="w-full border-collapse" id="score-table">
                 <thead>
                   <tr className="bg-surface-container-low border-b border-outline-variant text-on-surface-variant">
-                    <th className="text-left py-3 px-4 font-label-sm text-label-sm border-r border-outline-variant min-w-[120px]">Tên Bài Test</th>
-                    <th className="text-left py-3 px-4 font-label-sm text-label-sm border-r border-outline-variant">Ngày làm</th>
+                    <SortableTh label="Tên Bài Test" sortKey="testName" sortConfig={sortConfig} onSort={handleSort}
+                      className="text-left py-3 px-4 font-label-sm text-label-sm border-r border-outline-variant min-w-[120px]" />
+                    <SortableTh label="Ngày làm" sortKey="date" sortConfig={sortConfig} onSort={handleSort}
+                      className="text-left py-3 px-4 font-label-sm text-label-sm border-r border-outline-variant" />
                     <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant">P1</th>
                     <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant">P2</th>
                     <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant">P3</th>
                     <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant">P4</th>
-                    <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant bg-secondary-container/30">Nghe</th>
+                    <SortableTh label="Nghe" sortKey="listenScore" sortConfig={sortConfig} onSort={handleSort}
+                      className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant bg-secondary-container/30" />
                     <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant">P5</th>
                     <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant">P6</th>
                     <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant">P7</th>
-                    <th className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant bg-secondary-container/30">Đọc</th>
-                    <th className="text-center py-3 px-4 font-label-sm text-label-sm bg-primary-container text-white border-r border-primary">Tổng</th>
+                    <SortableTh label="Đọc" sortKey="readScore" sortConfig={sortConfig} onSort={handleSort}
+                      className="text-center py-3 px-2 font-label-sm text-label-sm border-r border-outline-variant bg-secondary-container/30" />
+                    <SortableTh label="Tổng" sortKey="totalScore" sortConfig={sortConfig} onSort={handleSort}
+                      className="text-center py-3 px-4 font-label-sm text-label-sm bg-primary-container text-white border-r border-primary" />
                     <th className="text-center py-3 px-4 font-label-sm text-label-sm">Hành động</th>
                   </tr>
                 </thead>
